@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { setStoredUser } from "../lib/auth";
+import { getApiUrl, setStoredUser } from "../lib/auth";
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -15,7 +15,7 @@ const Login: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/login`, {
+      const response = await fetch(getApiUrl("/api/auth/login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),

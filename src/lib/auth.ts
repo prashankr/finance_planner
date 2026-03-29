@@ -1,5 +1,4 @@
-const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:5000";
+const API_BASE_URL = process.env.REACT_APP_API_URL?.replace(/\/$/, "") || "";
 
 export type StoredUser = {
   id: string;
@@ -9,7 +8,8 @@ export type StoredUser = {
   base_currency_code?: string;
 };
 
-export const getApiUrl = (path: string) => `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+export const getApiUrl = (path: string) =>
+  `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 
 export const getStoredUser = (): StoredUser | null => {
   const raw = localStorage.getItem("user");
