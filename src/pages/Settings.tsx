@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { getStoredUser } from "../lib/auth";
-import { useFinanceData } from "../lib/financeStore";
+import { formatCurrency, useFinanceData } from "../lib/financeStore";
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 const ruleOptions = ["Enabled", "Disabled"] as const;
@@ -16,20 +16,22 @@ const Settings: React.FC = () => {
     goalContributionRule: data.settings.goalContributionRule,
     alertThreshold: String(data.settings.alertThreshold),
     themeMode: data.settings.themeMode,
+    openingCashBalance: String(data.settings.openingCashBalance),
   });
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     setData((current) => ({
       ...current,
-        settings: {
-          baseCurrencyCode: form.baseCurrencyCode.toUpperCase(),
-          budgetReminderDay: form.budgetReminderDay,
-          goalContributionRule: form.goalContributionRule as "Enabled" | "Disabled",
-          alertThreshold: Number(form.alertThreshold),
-          themeMode: form.themeMode as "light" | "dark",
-        },
-      }));
+      settings: {
+        baseCurrencyCode: form.baseCurrencyCode.toUpperCase(),
+        budgetReminderDay: form.budgetReminderDay,
+        goalContributionRule: form.goalContributionRule as "Enabled" | "Disabled",
+        alertThreshold: Number(form.alertThreshold),
+        themeMode: form.themeMode as "light" | "dark",
+        openingCashBalance: Number(form.openingCashBalance),
+      },
+    }));
     setMessage("Settings saved.");
     setTimeout(() => setMessage(null), 1800);
   };
@@ -46,8 +48,8 @@ const Settings: React.FC = () => {
           <div className="metric-value">{data.settings.budgetReminderDay}</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Alert threshold</div>
-          <div className="metric-value">{data.settings.alertThreshold}%</div>
+          <div className="metric-label">Opening cash</div>
+          <div className="metric-value">{formatCurrency(data.settings.openingCashBalance, data.settings.baseCurrencyCode)}</div>
         </div>
       </section>
 
@@ -56,19 +58,31 @@ const Settings: React.FC = () => {
           <div className="page-intro">
             <div className="eyebrow">Settings</div>
             <h1>Edit preferences</h1>
-            <p className="muted">Choose how the app looks and how reminders work. Everything here saves on this device for the current user.</p>
+            <p className="muted">Choose how the app looks, when reminders appear, and what cash balance your transaction history should build from.</p>
           </div>
 
           <form className="auth-form" onSubmit={handleSubmit}>
             <div className="field">
               <label htmlFor="settings-currency">Base currency code</label>
-              <div className="field-help">Use a 3-letter code like `USD`, `INR`, or `EUR` for totals across the app.</div>
+              <div className="field-help">Use a 3-letter code like USD, INR, or EUR for totals across the app.</div>
               <input
                 id="settings-currency"
                 value={form.baseCurrencyCode}
                 onChange={(event) => setForm((current) => ({ ...current, baseCurrencyCode: event.target.value }))}
                 placeholder="INR"
                 maxLength={3}
+                required
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="settings-openingCash">Opening cash balance</label>
+              <div className="field-help">Set the cash amount you had before your saved transactions begin. The app uses this as the starting point for automatic cash tracking.</div>
+              <input
+                id="settings-openingCash"
+                type="number"
+                step="0.01"
+                value={form.openingCashBalance}
+                onChange={(event) => setForm((current) => ({ ...current, openingCashBalance: event.target.value }))}
                 required
               />
             </div>
@@ -169,6 +183,13 @@ const Settings: React.FC = () => {
                 <span className="record-subtitle">Used across dashboard totals and records</span>
               </div>
               <div className="record-value">{data.settings.baseCurrencyCode}</div>
+            </div>
+            <div className="record-item">
+              <div className="record-main">
+                <span className="record-title">Opening cash balance</span>
+                <span className="record-subtitle">Starting point for automatic cash and net worth tracking</span>
+              </div>
+              <div className="record-value">{formatCurrency(data.settings.openingCashBalance, data.settings.baseCurrencyCode)}</div>
             </div>
             <div className="record-item">
               <div className="record-main">

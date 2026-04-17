@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { createId, formatCurrency, useFinanceData } from "../lib/financeStore";
+import { buildFinanceSnapshot, createId, formatCurrency, useFinanceData } from "../lib/financeStore";
 
 const itemTypes = ["asset", "liability"] as const;
 const emptyForm = { name: "", type: "asset" as (typeof itemTypes)[number], amount: "" };
@@ -10,11 +10,7 @@ const NetWorth: React.FC = () => {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const totals = useMemo(() => {
-    const assets = data.netWorth.filter((item) => item.type === "asset").reduce((sum, item) => sum + item.amount, 0);
-    const liabilities = data.netWorth.filter((item) => item.type === "liability").reduce((sum, item) => sum + item.amount, 0);
-    return { assets, liabilities, netWorth: assets - liabilities };
-  }, [data.netWorth]);
+  const snapshot = useMemo(() => buildFinanceSnapshot(data), [data]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -45,16 +41,20 @@ const NetWorth: React.FC = () => {
     <div className="page-width">
       <section className="summary-grid">
         <div className="metric-card">
-          <div className="metric-label">Assets</div>
-          <div className="metric-value">{formatCurrency(totals.assets, currency)}</div>
+          <div className="metric-label">Cash on hand</div>
+          <div className="metric-value">{formatCurrency(snapshot.cashOnHand, currency)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Other assets</div>
+          <div className="metric-value">{formatCurrency(snapshot.manualAssets, currency)}</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Liabilities</div>
-          <div className="metric-value">{formatCurrency(totals.liabilities, currency)}</div>
+          <div className="metric-value">{formatCurrency(snapshot.liabilities, currency)}</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Net worth</div>
-          <div className="metric-value">{formatCurrency(totals.netWorth, currency)}</div>
+          <div className="metric-value">{formatCurrency(snapshot.netWorth, currency)}</div>
         </div>
       </section>
 
@@ -63,25 +63,27 @@ const NetWorth: React.FC = () => {
           <div className="page-intro">
             <div className="eyebrow">Net worth</div>
             <h1>{editingId ? "Edit item" : "Add item"}</h1>
-            <p className="muted">List what you own as assets and what you owe as liabilities. The total net worth updates as soon as you save.</p>
+            <p className="muted">
+              Cash now comes from your opening balance plus transaction history. Add only longer-term assets and debts here so your net worth stays clean.
+            </p>
           </div>
 
           <form className="auth-form" onSubmit={handleSubmit}>
             <div className="field">
               <label htmlFor="networth-name">Name</label>
-              <div className="field-help">Examples: Checking account, Car loan, Emergency fund, Credit card.</div>
+              <div className="field-help">Examples: Mutual funds, car loan, brokerage account, student loan.</div>
               <input
                 id="networth-name"
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                placeholder="Checking, car loan, savings"
+                placeholder="Mutual funds, car loan, brokerage"
                 required
               />
             </div>
             <div className="field-row">
               <div className="field">
                 <label>Type</label>
-                <div className="field-help">Assets increase your net worth. Liabilities reduce it.</div>
+                <div className="field-help">Assets increase net worth. Liabilities reduce it.</div>
                 <div className="choice-row">
                   {itemTypes.map((type) => (
                     <button
@@ -97,7 +99,7 @@ const NetWorth: React.FC = () => {
               </div>
               <div className="field">
                 <label htmlFor="networth-amount">Amount</label>
-                <div className="field-help">Use the current balance or amount owed.</div>
+                <div className="field-help">Use the current market value or amount still owed.</div>
                 <input
                   id="networth-amount"
                   type="number"
@@ -123,8 +125,19 @@ const NetWorth: React.FC = () => {
         </section>
 
         <section className="data-card">
-          <div className="eyebrow">Saved items</div>
-          <h2 style={{ marginTop: 12, marginBottom: 8 }}>Your balance sheet</h2>
+          <div className="eyebrow">Balance sheet</div>
+          <h2 style={{ marginTop: 12, marginBottom: 8 }}>How your net worth is built</h2>
+          <div className="record-list">
+            <div className="record-item">
+              <div className="record-main">
+                <span className="record-title">Cash from transactions</span>
+                <span className="record-subtitle">
+                  Opening balance {formatCurrency(data.settings.openingCashBalance, currency)} plus all income minus all expenses
+                </span>
+              </div>
+              <div className="record-value trend-up">{formatCurrency(snapshot.cashOnHand, currency)}</div>
+            </div>
+          </div>
           {data.netWorth.length ? (
             <div className="record-list">
               {data.netWorth.map((item) => (
@@ -168,7 +181,7 @@ const NetWorth: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="empty-copy">No net worth items yet. Add assets or liabilities from the form.</div>
+            <div className="empty-copy">No additional assets or liabilities yet. Cash is already tracked automatically from transactions.</div>
           )}
         </section>
       </div>

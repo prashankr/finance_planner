@@ -1,7 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { createId, formatCurrency, useFinanceData } from "../lib/financeStore";
+import { buildFinanceSnapshot, createId, formatCurrency, useFinanceData } from "../lib/financeStore";
 
-const emptyForm = { category: "", limit: "", spent: "" };
+const emptyForm = { category: "", limit: "" };
+
+const toTitleCase = (value: string) =>
+  value.replace(/\w\S*/g, (segment) => segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase());
 
 const Budgets: React.FC = () => {
   const { data, setData } = useFinanceData();
@@ -9,11 +12,7 @@ const Budgets: React.FC = () => {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const totals = useMemo(() => {
-    const totalLimit = data.budgets.reduce((sum, item) => sum + item.limit, 0);
-    const totalSpent = data.budgets.reduce((sum, item) => sum + item.spent, 0);
-    return { totalLimit, totalSpent, left: totalLimit - totalSpent };
-  }, [data.budgets]);
+  const snapshot = useMemo(() => buildFinanceSnapshot(data), [data]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -25,9 +24,8 @@ const Budgets: React.FC = () => {
 
     const payload = {
       id: editingId || createId(),
-      category: form.category,
+      category: form.category.trim(),
       limit: Number(form.limit),
-      spent: Number(form.spent),
     };
 
     setData((current) => ({
@@ -45,15 +43,15 @@ const Budgets: React.FC = () => {
       <section className="summary-grid">
         <div className="metric-card">
           <div className="metric-label">Planned</div>
-          <div className="metric-value">{formatCurrency(totals.totalLimit, currency)}</div>
+          <div className="metric-value">{formatCurrency(snapshot.totalBudgeted, currency)}</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Spent</div>
-          <div className="metric-value">{formatCurrency(totals.totalSpent, currency)}</div>
+          <div className="metric-label">Spent this month</div>
+          <div className="metric-value">{formatCurrency(snapshot.totalBudgetSpent, currency)}</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Remaining</div>
-          <div className="metric-value">{formatCurrency(totals.left, currency)}</div>
+          <div className="metric-value">{formatCurrency(snapshot.budgetLeft, currency)}</div>
         </div>
       </section>
 
@@ -62,13 +60,15 @@ const Budgets: React.FC = () => {
           <div className="page-intro">
             <div className="eyebrow">Budgets</div>
             <h1>{editingId ? "Edit budget" : "Create budget"}</h1>
-            <p className="muted">Set a spending limit for each category so you can quickly see what is safe, tight, or overspent.</p>
+            <p className="muted">
+              Budgets now pull spending from your transactions automatically. You only set the limit, and the app keeps the usage in sync.
+            </p>
           </div>
 
           <form className="auth-form" onSubmit={handleSubmit}>
             <div className="field">
               <label htmlFor="budget-category">Category</label>
-              <div className="field-help">Create one budget per spending area such as Housing, Food, or Travel.</div>
+              <div className="field-help">Match the category name you use on transactions, like Housing, Food, or Travel.</div>
               <input
                 id="budget-category"
                 value={form.category}
@@ -77,34 +77,42 @@ const Budgets: React.FC = () => {
                 required
               />
             </div>
-            <div className="field-row">
-              <div className="field">
-                <label htmlFor="budget-limit">Limit</label>
-                <div className="field-help">This is the maximum amount you want to spend in that category.</div>
-                <input
-                  id="budget-limit"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.limit}
-                  onChange={(event) => setForm((current) => ({ ...current, limit: event.target.value }))}
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="budget-spent">Spent so far</label>
-                <div className="field-help">Update this with how much has already been used from the budget.</div>
-                <input
-                  id="budget-spent"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.spent}
-                  onChange={(event) => setForm((current) => ({ ...current, spent: event.target.value }))}
-                  required
-                />
-              </div>
+            <div className="field">
+              <label htmlFor="budget-limit">Monthly limit</label>
+              <div className="field-help">Use a cap you can comfortably maintain. The suggestion below uses your recent spending plus a small buffer.</div>
+              <input
+                id="budget-limit"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.limit}
+                onChange={(event) => setForm((current) => ({ ...current, limit: event.target.value }))}
+                required
+              />
             </div>
+            {snapshot.unbudgetedCategories.length ? (
+              <div className="field">
+                <label>Quick add from recent spend</label>
+                <div className="field-help">These categories already have expenses this month but no budget yet.</div>
+                <div className="choice-row">
+                  {snapshot.unbudgetedCategories.slice(0, 4).map((item) => (
+                    <button
+                      key={item.category}
+                      className="choice-chip"
+                      type="button"
+                      onClick={() =>
+                        setForm({
+                          category: toTitleCase(item.category),
+                          limit: String(item.suggestedLimit),
+                        })
+                      }
+                    >
+                      {toTitleCase(item.category)} {formatCurrency(item.suggestedLimit, currency)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="choice-row">
               <button className="button" type="submit">
                 {editingId ? "Update budget" : "Save budget"}
@@ -119,25 +127,46 @@ const Budgets: React.FC = () => {
         </section>
 
         <section className="data-card">
-          <div className="eyebrow">Saved categories</div>
+          <div className="eyebrow">Live categories</div>
           <h2 style={{ marginTop: 12, marginBottom: 8 }}>Your budgets</h2>
-          {data.budgets.length ? (
+          {snapshot.budgets.length ? (
             <div className="record-list">
-              {data.budgets.map((item) => {
-                const remaining = item.limit - item.spent;
-                const statusClass = remaining >= item.limit * 0.2 ? "trend-up" : remaining > 0 ? "trend-warn" : "trend-down";
+              {snapshot.budgets.map((item) => {
+                const statusClass = item.remaining >= item.limit * 0.2 ? "trend-up" : item.remaining > 0 ? "trend-warn" : "trend-down";
 
                 return (
                   <div className="record-item" key={item.id}>
                     <div className="record-main">
                       <span className="record-title">{item.category}</span>
                       <span className="record-subtitle">
-                        Spent {formatCurrency(item.spent, currency)} of {formatCurrency(item.limit, currency)}
+                        Spent {formatCurrency(item.spent, currency)} of {formatCurrency(item.limit, currency)} this month
                       </span>
+                      {item.suggestedLimit ? (
+                        <span className="record-subtitle">Suggested limit from recent history: {formatCurrency(item.suggestedLimit, currency)}</span>
+                      ) : null}
                     </div>
                     <div className="record-value">
-                      <div className={statusClass}>{formatCurrency(remaining, currency)} left</div>
+                      <div className={statusClass}>{formatCurrency(item.remaining, currency)} left</div>
+                      <div className="record-subtitle" style={{ textAlign: "right" }}>
+                        {item.percentUsed}% used
+                      </div>
                       <div className="record-actions">
+                        {item.suggestedLimit ? (
+                          <button
+                            className="button-ghost"
+                            type="button"
+                            onClick={() =>
+                              setData((current) => ({
+                                ...current,
+                                budgets: current.budgets.map((entry) =>
+                                  entry.id === item.id ? { ...entry, limit: item.suggestedLimit } : entry
+                                ),
+                              }))
+                            }
+                          >
+                            Use suggestion
+                          </button>
+                        ) : null}
                         <button
                           className="button-ghost"
                           type="button"
@@ -145,7 +174,6 @@ const Budgets: React.FC = () => {
                             setForm({
                               category: item.category,
                               limit: String(item.limit),
-                              spent: String(item.spent),
                             });
                             setEditingId(item.id);
                           }}
@@ -171,7 +199,7 @@ const Budgets: React.FC = () => {
               })}
             </div>
           ) : (
-            <div className="empty-copy">No budgets yet. Add your first category from the form.</div>
+            <div className="empty-copy">No budgets yet. Add one and spending will be tracked automatically from matching transactions.</div>
           )}
         </section>
       </div>

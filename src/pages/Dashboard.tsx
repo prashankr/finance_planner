@@ -2,7 +2,7 @@ import React, { useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { navItems } from "../lib/appData";
 import { getStoredUser, isAuthenticated } from "../lib/auth";
-import { formatCurrency, useFinanceData } from "../lib/financeStore";
+import { buildFinanceSnapshot, formatCurrency, useFinanceData } from "../lib/financeStore";
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -16,28 +16,10 @@ const Dashboard: React.FC = () => {
     }
   }, [navigate]);
 
-  const totals = useMemo(() => {
-    const income = data.transactions.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
-    const expenses = data.transactions.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
-    const budgetLeft = data.budgets.reduce((sum, item) => sum + (item.limit - item.spent), 0);
-    const goalSaved = data.goals.reduce((sum, item) => sum + item.saved, 0);
-    const goalTarget = data.goals.reduce((sum, item) => sum + item.target, 0);
-    const goalProgress = goalTarget ? Math.round((goalSaved / goalTarget) * 100) : 0;
-    const assets = data.netWorth.filter((item) => item.type === "asset").reduce((sum, item) => sum + item.amount, 0);
-    const liabilities = data.netWorth.filter((item) => item.type === "liability").reduce((sum, item) => sum + item.amount, 0);
+  const snapshot = useMemo(() => buildFinanceSnapshot(data), [data]);
 
-    return { income, expenses, budgetLeft, goalProgress, assets, liabilities, goalSaved, goalTarget };
-  }, [data]);
-
-  const budgetBars = useMemo(() => {
-    return data.budgets.slice(0, 4).map((item) => ({
-      ...item,
-      percent: item.limit ? Math.min(100, Math.round((item.spent / item.limit) * 100)) : 0,
-    }));
-  }, [data.budgets]);
-
-  const assetPercent = totals.assets + totals.liabilities
-    ? Math.round((totals.assets / (totals.assets + totals.liabilities)) * 100)
+  const assetPercent = snapshot.cashOnHand + snapshot.manualAssets + snapshot.liabilities
+    ? Math.round(((snapshot.cashOnHand + snapshot.manualAssets) / (snapshot.cashOnHand + snapshot.manualAssets + snapshot.liabilities)) * 100)
     : 0;
 
   if (!isAuthenticated()) {
@@ -54,7 +36,7 @@ const Dashboard: React.FC = () => {
               {user?.firstName ? `${user.firstName}, here is your money week.` : "Your money week."}
             </h1>
             <p className="section-copy" style={{ marginTop: 12, maxWidth: 720 }}>
-              Your key numbers, progress, and category health all live here so you can understand your finances at a glance.
+              Transactions now drive your cash, budgets, and a cleaner net worth view, so the numbers line up without manual double entry.
             </p>
           </div>
           <span className="pill">{currency} workspace</span>
@@ -62,16 +44,16 @@ const Dashboard: React.FC = () => {
         <div className="quick-stats" style={{ marginTop: 28 }}>
           <div className="metric-card">
             <div className="metric-label">Net cash flow</div>
-            <div className="metric-value">{formatCurrency(totals.income - totals.expenses, currency)}</div>
+            <div className="metric-value">{formatCurrency(snapshot.cashFlow, currency)}</div>
             <p className="muted" style={{ marginTop: 10 }}>
-              {formatCurrency(totals.income, currency)} in income and {formatCurrency(totals.expenses, currency)} in expenses.
+              {formatCurrency(snapshot.income, currency)} in income and {formatCurrency(snapshot.expenses, currency)} in expenses.
             </p>
           </div>
           <div className="metric-card">
             <div className="metric-label">Budget left</div>
-            <div className="metric-value">{formatCurrency(totals.budgetLeft, currency)}</div>
+            <div className="metric-value">{formatCurrency(snapshot.budgetLeft, currency)}</div>
             <p className="muted" style={{ marginTop: 10 }}>
-              Based on {data.budgets.length} budget categories you can edit anytime.
+              Live spending from {snapshot.budgets.length} categories matched against this month&apos;s transactions.
             </p>
           </div>
         </div>
@@ -85,16 +67,16 @@ const Dashboard: React.FC = () => {
               <h3 style={{ margin: "8px 0 0" }}>How your top categories are tracking</h3>
             </div>
           </div>
-          {budgetBars.length ? (
+          {snapshot.budgets.length ? (
             <div className="bar-chart">
-              {budgetBars.map((item) => (
+              {snapshot.budgets.slice(0, 4).map((item) => (
                 <div className="bar-row" key={item.id}>
                   <div className="bar-labels">
                     <span>{item.category}</span>
-                    <span>{item.percent}%</span>
+                    <span>{item.percentUsed}%</span>
                   </div>
                   <div className="bar-track">
-                    <div className="bar-fill" style={{ width: `${item.percent}%` }} />
+                    <div className="bar-fill" style={{ width: `${item.percentUsed}%` }} />
                   </div>
                 </div>
               ))}
@@ -108,7 +90,7 @@ const Dashboard: React.FC = () => {
           <div className="chart-header">
             <div>
               <div className="kicker">Wealth mix</div>
-              <h3 style={{ margin: "8px 0 0" }}>Assets vs liabilities</h3>
+              <h3 style={{ margin: "8px 0 0" }}>Cash and assets vs liabilities</h3>
             </div>
           </div>
           <div className="donut-wrap">
@@ -126,16 +108,16 @@ const Dashboard: React.FC = () => {
           </div>
           <div className="legend-list">
             <div className="legend-item">
-              <span><span className="legend-dot" style={{ background: "var(--brand)" }} />Assets</span>
-              <strong>{formatCurrency(totals.assets, currency)}</strong>
+              <span><span className="legend-dot" style={{ background: "var(--brand)" }} />Cash + assets</span>
+              <strong>{formatCurrency(snapshot.cashOnHand + snapshot.manualAssets, currency)}</strong>
             </div>
             <div className="legend-item">
               <span><span className="legend-dot" style={{ background: "var(--red)" }} />Liabilities</span>
-              <strong>{formatCurrency(totals.liabilities, currency)}</strong>
+              <strong>{formatCurrency(snapshot.liabilities, currency)}</strong>
             </div>
             <div className="legend-item">
               <span><span className="legend-dot" style={{ background: "var(--gold)" }} />Goal progress</span>
-              <strong>{totals.goalProgress}%</strong>
+              <strong>{snapshot.goalProgress}%</strong>
             </div>
           </div>
         </div>
@@ -167,10 +149,10 @@ const Dashboard: React.FC = () => {
               </div>
               <div className="feature-list__item">
                 <div>
-                  <strong>Goal progress</strong>
-                  <span className="muted">Combined progress across active goals.</span>
+                  <strong>Net worth</strong>
+                  <span className="muted">Cash from transactions plus tracked assets minus debt.</span>
                 </div>
-                <strong className={totals.goalProgress >= 60 ? "trend-up" : "trend-warn"}>{totals.goalProgress}%</strong>
+                <strong className={snapshot.netWorth >= 0 ? "trend-up" : "trend-down"}>{formatCurrency(snapshot.netWorth, currency)}</strong>
               </div>
               <div className="feature-list__item">
                 <div>

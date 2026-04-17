@@ -14,7 +14,6 @@ export type BudgetRecord = {
   id: string;
   category: string;
   limit: number;
-  spent: number;
 };
 
 export type GoalRecord = {
@@ -38,6 +37,7 @@ export type SettingsRecord = {
   goalContributionRule: "Enabled" | "Disabled";
   alertThreshold: number;
   themeMode: "light" | "dark";
+  openingCashBalance: number;
 };
 
 export type AlertRecord = {
@@ -57,7 +57,39 @@ export type FinanceData = {
   settings: SettingsRecord;
 };
 
+export type BudgetInsight = BudgetRecord & {
+  spent: number;
+  remaining: number;
+  percentUsed: number;
+  suggestedLimit: number;
+};
+
+export type CategorySuggestion = {
+  category: string;
+  spent: number;
+  suggestedLimit: number;
+};
+
+export type FinanceSnapshot = {
+  income: number;
+  expenses: number;
+  cashFlow: number;
+  cashOnHand: number;
+  budgetLeft: number;
+  totalBudgeted: number;
+  totalBudgetSpent: number;
+  budgets: BudgetInsight[];
+  unbudgetedCategories: CategorySuggestion[];
+  manualAssets: number;
+  liabilities: number;
+  netWorth: number;
+  goalSaved: number;
+  goalTarget: number;
+  goalProgress: number;
+};
+
 const STORAGE_KEY = "finance-planner-data";
+const CASH_ACCOUNT_PATTERN = /cash|checking|savings|wallet|current account|bank/i;
 
 const defaultData: FinanceData = {
   transactions: [
@@ -66,19 +98,18 @@ const defaultData: FinanceData = {
     { id: "t3", description: "Groceries", amount: 84, type: "expense", category: "Food", date: "2026-03-06" },
   ],
   budgets: [
-    { id: "b1", category: "Housing", limit: 1400, spent: 1240 },
-    { id: "b2", category: "Food", limit: 500, spent: 460 },
-    { id: "b3", category: "Transport", limit: 300, spent: 190 },
+    { id: "b1", category: "Housing", limit: 1400 },
+    { id: "b2", category: "Food", limit: 500 },
+    { id: "b3", category: "Transport", limit: 300 },
   ],
   goals: [
     { id: "g1", name: "Emergency fund", target: 5000, saved: 3400, dueDate: "2026-08-01" },
     { id: "g2", name: "Vacation", target: 2400, saved: 620, dueDate: "2026-12-15" },
   ],
   netWorth: [
-    { id: "n1", name: "Checking", type: "asset", amount: 3200 },
-    { id: "n2", name: "Savings", type: "asset", amount: 6220 },
-    { id: "n3", name: "Credit card", type: "liability", amount: 1120 },
-    { id: "n4", name: "Education loan", type: "liability", amount: 4900 },
+    { id: "n1", name: "Mutual funds", type: "asset", amount: 6200 },
+    { id: "n2", name: "Credit card", type: "liability", amount: 1120 },
+    { id: "n3", name: "Education loan", type: "liability", amount: 4900 },
   ],
   alerts: [
     {
@@ -109,7 +140,136 @@ const defaultData: FinanceData = {
     goalContributionRule: "Enabled",
     alertThreshold: 85,
     themeMode: "dark",
+    openingCashBalance: 4500,
   },
+};
+
+const normalizeCategory = (value: string) => value.trim().toLowerCase();
+
+const isCashAccount = (item: NetWorthRecord) => item.type === "asset" && CASH_ACCOUNT_PATTERN.test(item.name);
+
+const startOfMonth = (value: Date) => new Date(value.getFullYear(), value.getMonth(), 1);
+
+const isSameMonth = (dateString: string, referenceDate: Date) => {
+  const parsed = new Date(dateString);
+  return !Number.isNaN(parsed.getTime()) &&
+    parsed.getFullYear() === referenceDate.getFullYear() &&
+    parsed.getMonth() === referenceDate.getMonth();
+};
+
+const roundBudgetAmount = (value: number) => {
+  if (value <= 0) {
+    return 0;
+  }
+
+  const step = value < 250 ? 10 : value < 1000 ? 50 : 100;
+  return Math.ceil(value / step) * step;
+};
+
+const buildMonthlyCategorySpend = (transactions: TransactionRecord[], referenceDate: Date) => {
+  return transactions.reduce<Record<string, number>>((totals, transaction) => {
+    if (transaction.type !== "expense" || !transaction.category || !isSameMonth(transaction.date, referenceDate)) {
+      return totals;
+    }
+
+    const key = normalizeCategory(transaction.category);
+    totals[key] = (totals[key] || 0) + transaction.amount;
+    return totals;
+  }, {});
+};
+
+const getBudgetSuggestion = (transactions: TransactionRecord[], category: string, referenceDate: Date) => {
+  const normalizedCategory = normalizeCategory(category);
+  const windowStart = new Date(startOfMonth(referenceDate));
+  windowStart.setMonth(windowStart.getMonth() - 2);
+
+  const monthlyTotals = new Map<string, number>();
+
+  transactions.forEach((transaction) => {
+    const parsedDate = new Date(transaction.date);
+    if (
+      transaction.type !== "expense" ||
+      normalizeCategory(transaction.category) !== normalizedCategory ||
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate < windowStart
+    ) {
+      return;
+    }
+
+    const monthKey = `${parsedDate.getFullYear()}-${parsedDate.getMonth()}`;
+    monthlyTotals.set(monthKey, (monthlyTotals.get(monthKey) || 0) + transaction.amount);
+  });
+
+  if (!monthlyTotals.size) {
+    return 0;
+  }
+
+  const total = Array.from(monthlyTotals.values()).reduce((sum, amount) => sum + amount, 0);
+  const averageMonthlySpend = total / monthlyTotals.size;
+
+  return roundBudgetAmount(averageMonthlySpend * 1.1);
+};
+
+export const buildFinanceSnapshot = (data: FinanceData, referenceDate = new Date()): FinanceSnapshot => {
+  const income = data.transactions.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
+  const expenses = data.transactions.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
+  const cashFlow = income - expenses;
+  const cashOnHand = data.settings.openingCashBalance + cashFlow;
+
+  const currentMonthSpend = buildMonthlyCategorySpend(data.transactions, referenceDate);
+  const budgetNames = new Set(data.budgets.map((item) => normalizeCategory(item.category)));
+  const budgets = data.budgets.map((item) => {
+    const spent = currentMonthSpend[normalizeCategory(item.category)] || 0;
+    const remaining = item.limit - spent;
+    const percentUsed = item.limit ? Math.min(100, Math.round((spent / item.limit) * 100)) : 0;
+
+    return {
+      ...item,
+      spent,
+      remaining,
+      percentUsed,
+      suggestedLimit: getBudgetSuggestion(data.transactions, item.category, referenceDate),
+    };
+  });
+
+  const unbudgetedCategories = Object.entries(currentMonthSpend)
+    .filter(([category]) => !budgetNames.has(category))
+    .map(([category, spent]) => ({
+      category,
+      spent,
+      suggestedLimit: getBudgetSuggestion(data.transactions, category, referenceDate) || roundBudgetAmount(spent * 1.1),
+    }))
+    .sort((left, right) => right.spent - left.spent);
+
+  const totalBudgeted = budgets.reduce((sum, item) => sum + item.limit, 0);
+  const totalBudgetSpent = budgets.reduce((sum, item) => sum + item.spent, 0);
+  const budgetLeft = budgets.reduce((sum, item) => sum + item.remaining, 0);
+
+  const manualAssets = data.netWorth.filter((item) => item.type === "asset").reduce((sum, item) => sum + item.amount, 0);
+  const liabilities = data.netWorth.filter((item) => item.type === "liability").reduce((sum, item) => sum + item.amount, 0);
+  const netWorth = cashOnHand + manualAssets - liabilities;
+
+  const goalSaved = data.goals.reduce((sum, item) => sum + item.saved, 0);
+  const goalTarget = data.goals.reduce((sum, item) => sum + item.target, 0);
+  const goalProgress = goalTarget ? Math.round((goalSaved / goalTarget) * 100) : 0;
+
+  return {
+    income,
+    expenses,
+    cashFlow,
+    cashOnHand,
+    budgetLeft,
+    totalBudgeted,
+    totalBudgetSpent,
+    budgets,
+    unbudgetedCategories,
+    manualAssets,
+    liabilities,
+    netWorth,
+    goalSaved,
+    goalTarget,
+    goalProgress,
+  };
 };
 
 const loadFinanceData = (): FinanceData => {
@@ -119,14 +279,27 @@ const loadFinanceData = (): FinanceData => {
   }
 
   const parsed = JSON.parse(raw) as Partial<FinanceData>;
+  const savedNetWorth = parsed.netWorth || defaultData.netWorth;
+  const migratedOpeningCashBalance = savedNetWorth.filter(isCashAccount).reduce((sum, item) => sum + item.amount, 0);
+  const cleanNetWorth = savedNetWorth.filter((item) => !isCashAccount(item));
 
   return {
     transactions: parsed.transactions || defaultData.transactions,
-    budgets: parsed.budgets || defaultData.budgets,
+    budgets: (parsed.budgets || defaultData.budgets).map((item) => ({
+      id: item.id,
+      category: item.category,
+      limit: item.limit,
+    })),
     goals: parsed.goals || defaultData.goals,
-    netWorth: parsed.netWorth || defaultData.netWorth,
+    netWorth: cleanNetWorth,
     alerts: parsed.alerts || defaultData.alerts,
-    settings: { ...defaultData.settings, ...parsed.settings },
+    settings: {
+      ...defaultData.settings,
+      ...parsed.settings,
+      openingCashBalance:
+        parsed.settings?.openingCashBalance ??
+        (migratedOpeningCashBalance || defaultData.settings.openingCashBalance),
+    },
   };
 };
 

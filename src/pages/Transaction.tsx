@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { createId, formatCurrency, useFinanceData } from "../lib/financeStore";
+import { buildFinanceSnapshot, createId, formatCurrency, useFinanceData } from "../lib/financeStore";
 
 const transactionTypes = ["expense", "income"] as const;
 const emptyForm = {
@@ -16,11 +16,7 @@ const Transaction: React.FC = () => {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const totals = useMemo(() => {
-    const income = data.transactions.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
-    const expenses = data.transactions.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
-    return { income, expenses, balance: income - expenses };
-  }, [data.transactions]);
+  const snapshot = useMemo(() => buildFinanceSnapshot(data), [data]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -54,15 +50,15 @@ const Transaction: React.FC = () => {
       <section className="summary-grid">
         <div className="metric-card">
           <div className="metric-label">Income</div>
-          <div className="metric-value">{formatCurrency(totals.income, currency)}</div>
+          <div className="metric-value">{formatCurrency(snapshot.income, currency)}</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Expenses</div>
-          <div className="metric-value">{formatCurrency(totals.expenses, currency)}</div>
+          <div className="metric-value">{formatCurrency(snapshot.expenses, currency)}</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Balance</div>
-          <div className="metric-value">{formatCurrency(totals.balance, currency)}</div>
+          <div className="metric-label">Cash position</div>
+          <div className="metric-value">{formatCurrency(snapshot.cashOnHand, currency)}</div>
         </div>
       </section>
 
@@ -71,7 +67,9 @@ const Transaction: React.FC = () => {
           <div className="page-intro">
             <div className="eyebrow">Transactions</div>
             <h1>{editingId ? "Edit transaction" : "Add transaction"}</h1>
-            <p className="muted">Use this page to record money coming in or going out. New entries appear immediately in your saved list and dashboard totals.</p>
+            <p className="muted">
+              Transactions are now the main source of truth. Budget usage and cash-based net worth update automatically from what you add here.
+            </p>
           </div>
 
           <form className="auth-form" onSubmit={handleSubmit}>
@@ -120,7 +118,7 @@ const Transaction: React.FC = () => {
             <div className="field-row">
               <div className="field">
                 <label htmlFor="transaction-category">Category</label>
-                <div className="field-help">Examples: Food, Rent, Transport, Salary, Freelance.</div>
+                <div className="field-help">Use consistent category names so budgets can auto-match spending.</div>
                 <input
                   id="transaction-category"
                   value={form.category}
